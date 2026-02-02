@@ -1,0 +1,45 @@
+# Python 编译缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 虚拟环境
+.env
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+
+# IDE / 编辑器配置
+.vscode/
+.idea/
+
+# 日志 & 临时文件
+*.log
+*.tmp
+
+# Jupyter Notebook 检查点
+.ipynb_checkpoints/
+
+# 操作系统垃圾
+.DS_Store
+Thumbs.db
+
+# Unreal Engine 常见文件
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# 压缩包或大文件
+*.zip
+*.tar
+*.rar
+*.7z

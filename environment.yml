@@ -1,0 +1,12 @@
+name: deliverybench
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - setuptools
+  - wheel
+  - pip:
+      # Install this repo in editable mode.
+      # Run: conda env create -f environment.yml (from repo root)
+      - -e .

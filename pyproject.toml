@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "food-delivery-bench"
+version = "0.1.0"
+description = "Food Delivery Bench: simworld and vlm_delivery packages"
+readme = "readme.md"
+requires-python = ">=3.7"
+dependencies = [
+    "numpy",
+    "pandas",
+    "pyqtgraph",
+    "PyQt5",
+    "unrealcv",
+    "opencv-python",
+    "pillow",
+    "openai",
+    "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "flake8", "black"]
+
+[project.scripts]
+run_deliverybench = "vlm_delivery.scripts.run_deliverybench:main"
+
+[tool.setuptools.packages.find]
+where = [".", "simworld/simworld"]
+include = ["simworld*", "vlm_delivery*"]
