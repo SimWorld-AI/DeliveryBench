@@ -1,6 +1,6 @@
 # DeliveryBench: Can Agents Earn Profit in Real World?
 
-</p> <p align="center"> 📄 <a href="https://arxiv.org/abs/2512.19234">Paper</a> &nbsp; | &nbsp; 🏠 <a href="https://deliverybench.github.io/">Website</a> &nbsp; | &nbsp; 🏙️ <a href="#">City Environments (Download)</a> &nbsp  </p> <p align="center"> 
+</p> <p align="center"> 📄 <a href="https://arxiv.org/abs/2512.19234">Paper</a> &nbsp; | &nbsp; 🏠 <a href="https://deliverybench.github.io/">Website</a> &nbsp; | &nbsp; 🏙️ <a href="https://huggingface.co/datasets/SimWorld-AI/DeliveryBench/tree/main/Source">City Environments (Download)</a> &nbsp  </p> <p align="center"> 
 
 <p align="center">
   <a href="https://mao1207.github.io/">Lingjun Mao<sup>1</sup></a>, 
