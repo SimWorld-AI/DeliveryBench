@@ -118,16 +118,16 @@ Our DeliveryBench UE server is built on top of [SimWorld](https://github.com/Sim
 
 Start the DeliveryBench UE server first, then run the Python examples. From the extracted UE server package directory:
 
-- **Windows:** double-click `gym_citynav.exe`, or launch it from the command line:
+- **Windows:** double-click `SimWorld.exe`, or launch it from the command line:
 
   ```bash
-  gym_citynav.exe <map_name>
+  SimWorld.exe <map_name>
   ```
 
 - **Linux:** run:
 
   ```bash
-  ./gym_citynav.sh <map_name> -RenderOffscreen
+  ./SimWorld.sh <map_name> -RenderOffscreen
   ```
 
 Supported `map_name` options include (examples):
