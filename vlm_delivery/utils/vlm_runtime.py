@@ -312,3 +312,104 @@ def _vlm_on_failed(agent: Any, msg: str) -> None:
     """
     agent._log(f"[VLM] error: {msg}")
     _vlm_retry(agent, msg)
+
+
+# ============================================================================
+# Decoupled VLM helper for external drivers (e.g. gym-like env + notebooks)
+# ============================================================================
+
+def vlm_decide_action_with_retry(
+    agent: Any,
+    call_vlm: Any,
+    max_retries: int = 2,
+) -> tuple[Any, str, Optional[str]]:
+    """
+    Decoupled helper to run a VLM decision with DeliveryBench's parsing and
+    error-feedback conventions, without touching timers or action queues.
+
+    This function:
+        - Builds the VLM prompt via `agent.build_vlm_input()`, which already
+          includes `vlm_ephemeral` hints and `vlm_errors` (recent_error block).
+        - On parse failure, it:
+            * Writes a `format_hint` into `agent.vlm_ephemeral` using the same
+              text as `_vlm_retry`.
+            * Calls `agent.vlm_add_error(...)` so that `vlm_build_input` will
+              surface a `### recent_error` section on the next attempt.
+        - Retries up to `max_retries` times, each time calling the injected
+          `call_vlm(prompt: str) -> str`.
+        - Uses `parse_vlm_action` (i.e. `gameplay.action_space.parse_action`)
+          to validate that the model output is a legal DeliveryBench action.
+
+    Parameters
+    ----------
+    agent:
+        A `DeliveryMan`-like object that implements:
+          - build_vlm_input()
+          - vlm_add_error(str)
+          - vlm_ephemeral (dict-like)
+    call_vlm:
+        Callable taking `prompt: str` and returning raw model output as `str`.
+        Users can wrap any model/provider here (OpenAI, OpenRouter, local HF...).
+    max_retries:
+        Maximum number of parse/validation retries before giving up.
+
+    Returns
+    -------
+    (dm_action, raw_text, last_error_str)
+
+    - dm_action:
+        A `DMAction` instance (on success), or a safe fallback
+        `DMActionKind.VIEW_ORDERS` if all retries fail.
+    - raw_text:
+        The last raw model output seen.
+    - last_error_str:
+        None if the final attempt succeeded; otherwise, a human-readable
+        description of why parsing/validation failed (suitable for logging
+        or additional UI).
+    """
+    from ..entities.delivery_man import DMAction, DMActionKind  # type: ignore
+
+    last_error: Optional[str] = None
+    last_raw: str = ""
+
+    for attempt in range(1, int(max_retries) + 1):
+        # If there was a previous failure, update ephemeral hints + recent_error
+        if last_error:
+            agent.vlm_ephemeral["format_hint"] = (
+                "Your previous output was invalid. "
+                "Reply with exactly ONE action call from the Action API. "
+                "No explanations or apologies."
+            )
+            agent.vlm_add_error(
+                f"VLM invalid output (attempt {attempt}/{max_retries}): {last_error}"
+            )
+
+        # Always rebuild the prompt via DeliveryBench's official builder.
+        prompt = agent.build_vlm_input()
+
+        # External model call (fully decoupled from DeliveryBench internals).
+        raw = str(call_vlm(prompt))
+        last_raw = raw
+
+        try:
+            dm_action, language_plan = parse_vlm_action(raw, agent)
+            agent._previous_language_plan = language_plan
+
+            if not isinstance(dm_action, DMAction):
+                raise ValueError(f"parse_vlm_action returned non-DMAction: {type(dm_action)}")
+
+            # On success, clear error hint for future steps.
+            agent.vlm_ephemeral.pop("format_hint", None)
+            agent.vlm_clear_errors()
+            return dm_action, last_raw, None
+
+        except Exception as e:
+            # Record reason and continue to next attempt.
+            last_error = str(e)
+            continue
+
+    # All retries failed → safe fallback DMAction
+    fallback = DMAction(DMActionKind.VIEW_ORDERS, data={})
+    if last_error is None:
+        last_error = "VLM failed without a specific error message."
+    return fallback, last_raw, last_error

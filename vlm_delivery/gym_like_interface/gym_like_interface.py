@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-DeliveryBenchGymEnvQtRouteA — Qt-thread-only mutations + Script-safe driving (Windows/PyQt5)
+DeliveryBenchGymEnv — Qt-thread-only mutations + Script-safe driving (Windows/PyQt5)
 
 Key rules enforced:
 - Qt GUI thread is the ONLY thread allowed to touch Qt objects / viewer / timers / DM methods that might touch Qt.
@@ -170,7 +170,7 @@ class _MainThreadInvoker:
 # -----------------------------------------------------------------------------
 # Env
 # -----------------------------------------------------------------------------
-class DeliveryBenchGymEnvQtRouteA:
+class DeliveryBenchGymEnv:
     def __init__(
         self,
         base_dir: str,
@@ -260,6 +260,12 @@ class DeliveryBenchGymEnvQtRouteA:
     # Gym-like API
     # -------------------------------------------------------------------------
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
+        """
+        Reset the env. When using Qt (viewer/timers), call this from the Python
+        main thread (e.g. in Jupyter run reset() in the cell that runs the loop,
+        not inside a background thread) to avoid "Timers cannot be started from
+        another thread" and kernel crashes.
+        """
         if not self._qt_bootstrapped or self._invoker is None:
             raise RuntimeError("Call env.bootstrap_qt() on Python main thread before env.reset().")
 
@@ -398,20 +404,6 @@ class DeliveryBenchGymEnvQtRouteA:
         dm.manual_step = True
         dm._step_cv = self._cv
 
-        # VLM setup
-        agent_cfg = _get_agent_model_config("1", models_config)
-        provider = (agent_cfg.get("provider") or "openai").lower()
-
-        openai_key = os.getenv("OPENAI_KEY") or os.getenv("OPENAI_API_KEY") or ""
-        openrouter_key = os.getenv("OPENROUTER_KEY") or os.getenv("OPENROUTER_API_KEY") or ""
-        api_key = openai_key if provider == "openai" else openrouter_key
-        if not api_key:
-            raise RuntimeError(f"Missing API key for provider={provider}. Set OPENAI_API_KEY or OPENROUTER_API_KEY.")
-
-        llm = BaseModel(url=agent_cfg.get("url"), api_key=api_key, model=agent_cfg.get("model"))
-        dm.set_vlm_client(llm)
-        dm.set_vlm_executor(self._executor)
-
         self._wait_until_ready(ue, ["1"], timeout_s=self.ready_timeout_s)
 
         # save handles
@@ -423,12 +415,11 @@ class DeliveryBenchGymEnvQtRouteA:
         self.map_exportor = map_exportor
 
         # timers must be created/started on Qt thread
+        # NOTE: This gym interface is now VLM-agnostic: it does NOT own or call any VLM client.
+        # It only advances sim-time and executes DMAction instances enqueued by the caller.
         box = self._invoker.call(self._start_sim_timer)
         if not box.get("ok", False):
             raise RuntimeError(f"start_sim_timer failed:\n{box.get('exc')}")
-        box = self._invoker.call(self._start_vlm_pump_timer)
-        if not box.get("ok", False):
-            raise RuntimeError(f"start_vlm_pump_timer failed:\n{box.get('exc')}")
 
         obs = self._build_obs()
         info = {
@@ -443,12 +434,21 @@ class DeliveryBenchGymEnvQtRouteA:
 
     def step(self, action: Any):
         """
-        Route A:
-        - action is not None: execute exactly ONE DMAction (manual_step boundary)
-        - action is None: dispatch ONE VLM request on Qt thread -> wait until exactly ONE action finishes
+        Execute exactly ONE DeliveryBench action (manual_step boundary).
 
-        Robustness:
-        - Use dm._manual_step_done_seq as the step boundary signal (never misses very fast actions).
+        This gym-like interface is **decoupled from any VLM logic**:
+
+        - The caller is responsible for:
+          * Building prompts (e.g., via `dm.build_vlm_input()`).
+          * Calling a VLM / LLM client.
+          * Parsing the model output into a concrete action string.
+          * (Optionally) implementing retry and error-feedback policies.
+        - This env only:
+          * Optionally parses an action string into a `DMAction` via
+            `gameplay.action_space.parse_action`.
+          * Enqueues the resulting `DMAction` on the Qt thread.
+          * Waits until exactly ONE manual step finishes.
+          * Returns obs / reward / done / truncated / info.
         """
         if not self.dms:
             raise RuntimeError("Env not reset() yet")
@@ -475,66 +475,50 @@ class DeliveryBenchGymEnvQtRouteA:
 
         done0 = _done_seq()
 
-        # direct action
-        if action is not None:
-            box = self._invoker.call(lambda: dm.enqueue_action(action))
-            if not box.get("ok", False):
-                return self._build_obs(), 0.0, False, True, {"error": "enqueue_failed", "enqueue_exc": box.get("exc")}
+        # The caller must provide an action. None is no longer meaningful here.
+        if action is None:
+            return self._build_obs(), 0.0, False, True, {
+                "error": "action_none_not_supported_in_decoupled_env"
+            }
 
-            with self._cv:
-                ok_done = self._cv.wait_for(lambda: _done_seq() > done0, timeout=self.action_timeout_s)
-                if not ok_done:
-                    return self._build_obs(), 0.0, False, True, {
-                        "error": "timeout_waiting_action_done",
-                        "done0": done0,
-                        "done_now": _done_seq(),
-                        "current": repr(getattr(dm, "_current", None)),
-                        "queue_len": len(getattr(dm, "_queue", []) or []),
-                    }
+        # If the caller passed a string, parse it into a DMAction using DeliveryBench's
+        # own gameplay.action_space.parse_action, so that semantic validation errors
+        # are detected here and surfaced back to the caller.
+        action_obj = action
+        if isinstance(action, str):
+            try:
+                from ..gameplay.action_space import parse_action as _parse_action  # type: ignore
 
-            return self._finalize_step({"mode": "direct_action", "done0": done0, "done1": _done_seq()})
-
-        # VLM dispatch
-        t0 = time.time()
-        dispatch_box = self._invoker.call(lambda: self._dispatch_vlm_once(dm))
-        print("invoker elapsed:", time.time() - t0, "ok=", dispatch_box.get("ok"), "exc=", dispatch_box.get("exc"))
-
-        with self._cv:
-            self._cv.notify_all()
-
-        if not dispatch_box.get("ok", False):
-            return self._build_obs(), 0.0, False, True, {"error": "dispatch_failed_on_qt_thread", "dispatch_exc": dispatch_box.get("exc")}
-
-        # best-effort wait VLM in-flight marked
-        with self._cv:
-            ok_sent = self._cv.wait_for(
-                lambda: bool(getattr(dm, "_waiting_vlm", False)) and bool(getattr(dm, "_vlm_future", None)),
-                timeout=3.0,
-            )
-            if not ok_sent:
+                dmaction, _ = _parse_action(action, dm)
+                action_obj = dmaction
+            except Exception as e_parse:
                 return self._build_obs(), 0.0, False, True, {
-                    "error": "vlm_not_dispatched",
-                    "waiting_vlm": getattr(dm, "_waiting_vlm", None),
-                    "has_future": bool(getattr(dm, "_vlm_future", None)),
-                    "done0": done0,
-                    "done_now": _done_seq(),
+                    "error": "parse_action_failed",
+                    "parse_exc": repr(e_parse),
+                    "raw_action": action,
                 }
 
-        # wait one action finishes
+        # Enqueue exactly one DMAction on the Qt thread
+        box = self._invoker.call(lambda: dm.enqueue_action(action_obj))
+        if not box.get("ok", False):
+            return self._build_obs(), 0.0, False, True, {
+                "error": "enqueue_failed",
+                "enqueue_exc": box.get("exc"),
+            }
+
+        # Wait until that action finishes (manual_step boundary)
         with self._cv:
             ok_done = self._cv.wait_for(lambda: _done_seq() > done0, timeout=self.action_timeout_s)
             if not ok_done:
                 return self._build_obs(), 0.0, False, True, {
-                    "error": "timeout_waiting_action_done_after_vlm",
+                    "error": "timeout_waiting_action_done",
                     "done0": done0,
                     "done_now": _done_seq(),
-                    "waiting_vlm": getattr(dm, "_waiting_vlm", None),
-                    "has_future": bool(getattr(dm, "_vlm_future", None)),
                     "current": repr(getattr(dm, "_current", None)),
                     "queue_len": len(getattr(dm, "_queue", []) or []),
                 }
 
-        return self._finalize_step({"mode": "vlm_decision", "done0": done0, "done1": _done_seq()})
+        return self._finalize_step({"mode": "direct_action", "done0": done0, "done1": _done_seq()})
 
     # -------------------------------------------------------------------------
     # Jupyter-safe event pumping (NO app.exec_)

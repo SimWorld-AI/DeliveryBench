@@ -2,7 +2,7 @@
   "gym_env": {
     "base_dir": null,
     "ue_ip": "127.0.0.1",
-    "ue_port": 9015,
+    "ue_port": 9010,
     "map_name": "medium-city-22"
   },
   "lifecycle": {

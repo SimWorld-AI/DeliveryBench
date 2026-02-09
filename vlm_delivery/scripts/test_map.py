@@ -1,5 +1,6 @@
-#!/usr/bin/env python3
+# scripts/test_map.py
 # -*- coding: utf-8 -*-
+
 """
 Headless map rendering smoke test (no GUI / no interaction).
 
