@@ -18,7 +18,7 @@
 
 ## 🎬 Demonstration
 <p align="center">
-  <a href="https://youtu.be/XizDL9Hv6q0?si=1fQivfG0ExmQQJEl" target="_blank" rel="noopener noreferrer">
+  <a href="https://youtu.be/gBV4Sc1i9EA" target="_blank" rel="noopener noreferrer">
     <img
       src="https://img.youtube.com/vi/XizDL9Hv6q0/0.jpg"
       alt="SimWorld Demo Video"
@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <a href="https://youtu.be/XizDL9Hv6q0?si=1fQivfG0ExmQQJEl" target="_blank" rel="noopener noreferrer">
+  <a href="https://youtu.be/gBV4Sc1i9EA" target="_blank" rel="noopener noreferrer">
     ▶ Watch the demo on YouTube
   </a>
 </p>
